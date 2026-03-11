@@ -8,12 +8,27 @@ from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 import io
 
+import firebase_admin
+from firebase_admin import credentials, storage
 from google import genai
-# Note: You will later need to run `pip install google-cloud-aiplatform` for AutoML
-# from google.cloud import aiplatform 
 
-# Paste your PERSONAL @gmail.com API key here!
-client = genai.Client(api_key="AIzaSyBe7lB08tLCGuVcV6PU8Yp4rqor7LBXmXQ")
+# --- 1. INITIALIZE FIREBASE STORAGE ---
+try:
+    # Ensure serviceAccountKey.json is in your GitHub root
+    cred = credentials.Certificate("serviceAccountKey.json")
+    firebase_admin.initialize_app(cred, {
+        'storageBucket': 'checkgrade-by-adt.firebasestorage.app'
+    })
+    bucket = storage.bucket()
+    print("✅ Firebase Admin initialized securely.")
+except Exception as e:
+    print(f"⚠️ Firebase initialization failed (check your JSON key): {e}")
+
+# --- 2. INITIALIZE GEMINI (VIA RENDER ENVIRONMENT VARIABLE) ---
+api_key = os.environ.get("GEMINI_API_KEY")
+if not api_key:
+    print("⚠️ WARNING: GEMINI_API_KEY environment variable not found!")
+client = genai.Client(api_key=api_key)
 
 app = FastAPI()
 
@@ -25,16 +40,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- NEW: SHADOW LOGGER CONFIGURATION ---
-# This creates a folder to store data for your future custom AutoML model
-TRAINING_DIR = "automl_training_dataset"
-if not os.path.exists(TRAINING_DIR):
-    os.makedirs(TRAINING_DIR)
-    print(f"📁 Initializing training directory: {TRAINING_DIR}")
-
 print("\n" + "="*50)
-print("✅✅✅ DUAL-ENGINE AI SERVER WITH SHADOW LOGGER ✅✅✅")
+print("✅✅✅ DUAL-ENGINE AI SERVER WITH CLOUD SHADOW LOGGER ✅✅✅")
 print("="*50 + "\n")
+
+# --- HEALTH CHECK ROUTE ---
+@app.get("/")
+def read_root():
+    return {"status": "CheckGrade AI Server is Live and Connected to Firebase"}
 
 @app.post("/api/audit-zone")
 async def audit_zone(
@@ -51,7 +64,7 @@ async def audit_zone(
             standard_image_url = f"http://localhost:8081{standard_image_url}"
         standard_image_url = standard_image_url.replace(" ", "%20")
         
-        # 2. Open Images
+        # 2. Open Images (Keep raw bytes for Firebase Upload later)
         image_data = await actual_image.read()
         actual_img = Image.open(io.BytesIO(image_data))
 
@@ -83,25 +96,30 @@ async def audit_zone(
             result_text = response.text.replace("```json", "").replace("```", "").strip()
             result_data = json.loads(result_text)
 
-            # --- SHADOW LOGGING LOGIC ---
-            # Automatically save this interaction to build your custom dataset
+            # --- CLOUD SHADOW LOGGING LOGIC ---
+            # Automatically save this interaction to Firebase to build your custom dataset
             try:
-                session_id = str(uuid.uuid4())[:8]
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                folder_name = f"{timestamp}_{session_id}"
-                save_path = os.path.join(TRAINING_DIR, folder_name)
-                os.makedirs(save_path)
-
-                # Save the audit photo taken by the auditor
-                actual_img.save(os.path.join(save_path, "actual_scan.jpg"))
-                
-                # Save Gemini's score as the "Teacher Label" for the future AI
-                with open(os.path.join(save_path, "ai_label.json"), "w") as f:
-                    json.dump(result_data, f, indent=4)
+                if 'bucket' in globals():
+                    session_id = str(uuid.uuid4())[:8]
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    score = result_data.get("score", 0)
                     
-                print(f"📊 Shadow Logged: Training data saved to {save_path}")
+                    # Group them by score in Firebase (e.g., /automl_training_dataset/score_4.5/...)
+                    base_path = f"automl_training_dataset/score_{score}/{timestamp}_{session_id}"
+                    
+                    # 1. Upload the raw image
+                    img_blob = bucket.blob(f"{base_path}/actual_scan.jpg")
+                    img_blob.upload_from_string(image_data, content_type='image/jpeg')
+                    
+                    # 2. Upload the Gemini JSON label
+                    json_blob = bucket.blob(f"{base_path}/ai_label.json")
+                    json_blob.upload_from_string(json.dumps(result_data, indent=4), content_type='application/json')
+                    
+                    print(f"📊 Cloud Shadow Logged: Saved to Firebase Storage -> {base_path}")
+                else:
+                    print("⚠️ Firebase not initialized. Skipping cloud log.")
             except Exception as log_error:
-                print(f"⚠️ Shadow Logging failed: {log_error}")
+                print(f"⚠️ Cloud Shadow Logging failed: {log_error}")
 
             return result_data
 
