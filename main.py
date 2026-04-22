@@ -3,11 +3,10 @@ import json
 import urllib.request
 import uuid
 from datetime import datetime
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 import io
-import httpx
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
-from fastapi.middleware.cors import CORSMiddleware
 
 import firebase_admin
 from firebase_admin import credentials, storage
@@ -50,42 +49,8 @@ print("="*50 + "\n")
 def read_root():
     return {"status": "CheckGrade AI Server is Live and Connected to Firebase"}
 
-def resize_image(image: Image.Image, max_dim: int = 1024) -> Image.Image:
-    """Resizes an image maintaining aspect ratio if any dimension exceeds max_dim."""
-    w, h = image.size
-    if max(w, h) > max_dim:
-        scale = max_dim / max(w, h)
-        new_size = (int(w * scale), int(h * scale))
-        return image.resize(new_size, Image.Resampling.LANCZOS)
-    return image
-
-def log_to_firebase(image_data, result_data):
-    """Background task to log interaction to Firebase."""
-    try:
-        if 'bucket' in globals():
-            session_id = str(uuid.uuid4())[:8]
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            score = result_data.get("score", 0)
-            
-            base_path = f"automl_training_dataset/score_{score}/{timestamp}_{session_id}"
-            
-            # 1. Upload the raw image
-            img_blob = bucket.blob(f"{base_path}/actual_scan.jpg")
-            img_blob.upload_from_string(image_data, content_type='image/jpeg')
-            
-            # 2. Upload the Gemini JSON label
-            json_blob = bucket.blob(f"{base_path}/ai_label.json")
-            json_blob.upload_from_string(json.dumps(result_data, indent=4), content_type='application/json')
-            
-            print(f"📊 Cloud Shadow Logged: Saved to Firebase Storage -> {base_path}")
-        else:
-            print("⚠️ Firebase not initialized. Skipping cloud log.")
-    except Exception as log_error:
-        print(f"⚠️ Cloud Shadow Logging failed: {log_error}")
-
 @app.post("/api/audit-zone")
 async def audit_zone(
-    background_tasks: BackgroundTasks,
     actual_image: UploadFile = File(...), 
     standard_image_url: str = Form(...),
     engine: str = Form("gemini")
@@ -101,19 +66,12 @@ async def audit_zone(
         
         # 2. Open Images (Keep raw bytes for Firebase Upload later)
         image_data = await actual_image.read()
-        actual_img_raw = Image.open(io.BytesIO(image_data))
-        
-        # Optimize: Resize actual image for faster AI processing
-        actual_img = resize_image(actual_img_raw)
+        actual_img = Image.open(io.BytesIO(image_data))
 
-        async with httpx.AsyncClient() as client_http:
-            resp = await client_http.get(standard_image_url, timeout=10.0)
-            resp.raise_for_status()
-            standard_img_data = resp.content
-        
-        standard_img_raw = Image.open(io.BytesIO(standard_img_data))
-        # Optimize: Resize standard image for faster AI processing
-        standard_img = resize_image(standard_img_raw)
+        req = urllib.request.Request(standard_image_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req) as response:
+            standard_img_data = response.read()
+        standard_img = Image.open(io.BytesIO(standard_img_data))
 
         # ==========================================
         # PATH A: GEMINI ENGINE (General Intelligence)
@@ -131,15 +89,37 @@ async def audit_zone(
             """
             
             response = client.models.generate_content(
-                model='gemini-2.0-flash', 
+                model='gemini-2.5-flash', 
                 contents=[prompt, standard_img, actual_img]
             )
             
             result_text = response.text.replace("```json", "").replace("```", "").strip()
             result_data = json.loads(result_text)
 
-            # --- OPTIMIZED LOGGING: Move to Background Task ---
-            background_tasks.add_task(log_to_firebase, image_data, result_data)
+            # --- CLOUD SHADOW LOGGING LOGIC ---
+            # Automatically save this interaction to Firebase to build your custom dataset
+            try:
+                if 'bucket' in globals():
+                    session_id = str(uuid.uuid4())[:8]
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    score = result_data.get("score", 0)
+                    
+                    # Group them by score in Firebase (e.g., /automl_training_dataset/score_4.5/...)
+                    base_path = f"automl_training_dataset/score_{score}/{timestamp}_{session_id}"
+                    
+                    # 1. Upload the raw image
+                    img_blob = bucket.blob(f"{base_path}/actual_scan.jpg")
+                    img_blob.upload_from_string(image_data, content_type='image/jpeg')
+                    
+                    # 2. Upload the Gemini JSON label
+                    json_blob = bucket.blob(f"{base_path}/ai_label.json")
+                    json_blob.upload_from_string(json.dumps(result_data, indent=4), content_type='application/json')
+                    
+                    print(f"📊 Cloud Shadow Logged: Saved to Firebase Storage -> {base_path}")
+                else:
+                    print("⚠️ Firebase not initialized. Skipping cloud log.")
+            except Exception as log_error:
+                print(f"⚠️ Cloud Shadow Logging failed: {log_error}")
 
             return result_data
 
