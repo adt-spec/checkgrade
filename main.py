@@ -79,7 +79,13 @@ def log_to_firebase(image_data, result_data):
 # --- HEALTH CHECK ROUTE ---
 @app.get("/")
 def read_root():
-    return {"status": "CheckGrade AI Server is Live and Connected to Firebase"}
+    api_key_exists = "Yes" if os.environ.get("GEMINI_API_KEY") else "No"
+    return {
+        "status": "CheckGrade AI Server is Live",
+        "firebase_connected": 'bucket' in globals(),
+        "gemini_api_key_configured": api_key_exists,
+        "engine_version": "2.1-Robust"
+    }
 
 @app.post("/api/audit-zone")
 async def audit_zone(
@@ -119,14 +125,35 @@ async def audit_zone(
             { "score": 2.5, "feedback": "Explanation...", "analysis_type": "Needs Improvement" }
             """
             
-            # Use Gemini 2.0 Flash (Fastest)
-            response = client.models.generate_content(
-                model='gemini-2.0-flash', 
-                contents=[prompt, standard_img, actual_img]
-            )
+            # --- ROBUST FALLBACK ENGINE ---
+            models_to_try = ['gemini-2.0-flash', 'gemini-1.5-flash']
+            response = None
+            last_error = ""
+            active_model = ""
+
+            for model_name in models_to_try:
+                try:
+                    print(f"🤖 Attempting analysis with: {model_name}")
+                    response = client.models.generate_content(
+                        model=model_name, 
+                        contents=[prompt, standard_img, actual_img]
+                    )
+                    active_model = model_name
+                    print(f"✅ Analysis Successful using {model_name}")
+                    break
+                except Exception as e:
+                    last_error = str(e)
+                    print(f"⚠️ Model {model_name} failed: {last_error}")
+            
+            if not response:
+                print("❌ ALL AI MODELS FAILED")
+                raise HTTPException(status_code=503, detail=f"AI Engine Offline. Please try again later. (Error: {last_error})")
             
             result_text = response.text.replace("```json", "").replace("```", "").strip()
             result_data = json.loads(result_text)
+            
+            # Add metadata about which model was used
+            result_data["engine_used"] = active_model
 
             # --- OPTIMIZED: Move logging to background task ---
             background_tasks.add_task(log_to_firebase, image_data, result_data)
