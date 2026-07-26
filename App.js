@@ -7,6 +7,7 @@ import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, addDoc, getDocs, query, orderBy, limit } from "firebase/firestore";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { getAnalytics } from "firebase/analytics";
 
 // --- YOUR FIREBASE CONFIG ---
 // Replace the values below with the ones from your Firebase Console
@@ -17,12 +18,16 @@ const firebaseConfig = {
   storageBucket: "checkgrade-by-adt.firebasestorage.app",
   messagingSenderId: "44213462502",
   appId: "1:44213462502:web:5d98de4c9aafef4a1da227",
+  measurementId: "G-0FFL462BG2"
 };
 
 // Initialize Firebase
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
 const storage = getStorage(firebaseApp);
+if (typeof window !== 'undefined') {
+  const analytics = getAnalytics(firebaseApp);
+}
 
 // --- COMPONENTS ---
 import Login from './Login';

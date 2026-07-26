@@ -39,3 +39,9 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Python & Secrets
+.venv/
+__pycache__/
+*.pyc
+serviceAccountKey.json

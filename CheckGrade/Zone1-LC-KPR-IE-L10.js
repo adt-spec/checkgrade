@@ -234,7 +234,7 @@ function ChecklistSection({ point, index, isLast, onResult, onError }) {
   const [actualImage, setActualImage] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiResult, setAiResult] = useState(null);
-  const selectedEngine = 'gemini'; 
+  const selectedEngine = 'openai'; 
 
   const takePicture = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
@@ -280,7 +280,7 @@ function ChecklistSection({ point, index, isLast, onResult, onError }) {
       console.log(`[CHECKPOINT ${index}] Sending POST request to Render...`);
 
       // 🚨 THE FIX: No 'headers' block used here at all! 
-      const response = await fetch('/api/audit-zone', { 
+      const response = await fetch('https://checkgrade.onrender.com/api/audit-zone', { 
           method: 'POST', 
           body: formData 
       });
