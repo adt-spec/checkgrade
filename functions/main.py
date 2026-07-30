@@ -12,6 +12,9 @@ from firebase_admin import credentials, storage
 from google import genai
 from firebase_functions import https_fn
 
+# Trigger redeploy for valid AIza key (fixed duplication issue)
+
+
 # Firebase is deferred entirely to prevent deployment hang
 
 # Cache to prevent downloading standard images on every request
@@ -73,7 +76,7 @@ def api(req: https_fn.Request) -> https_fn.Response:
         }), status=200, headers={"Content-Type": "application/json", **headers})
 
     # Main API route
-    if req.path == "/audit-zone":
+    if req.path == "/audit-zone" or req.path == "/api/audit-zone":
         if req.method != "POST":
             return https_fn.Response(json.dumps({"error": "Method not allowed"}), status=405, headers={"Content-Type": "application/json", **headers})
             
@@ -122,11 +125,9 @@ def api(req: https_fn.Request) -> https_fn.Response:
 
                 models_to_try = [
                     'gemini-2.5-flash',
+                    'gemini-2.5-pro',
                     'gemini-2.0-flash', 
-                    'gemini-2.0-flash-exp',
-                    'gemini-1.5-flash-latest', 
-                    'gemini-1.5-flash',
-                    'gemini-1.5-pro'
+                    'gemini-2.0-flash-lite'
                 ]
                 
                 response = None
@@ -146,6 +147,9 @@ def api(req: https_fn.Request) -> https_fn.Response:
                     except Exception as e:
                         last_error = str(e)
                         print(f"⚠️ Model {model_name} failed: {last_error}")
+                        # Break early if it's an authorization (400) or billing (429) error
+                        if "429" in last_error or "400" in last_error or "RESOURCE_EXHAUSTED" in last_error:
+                            break
                 
                 if not response:
                     return https_fn.Response(json.dumps({"error": f"AI Engine Offline. {last_error}"}), status=503, headers={"Content-Type": "application/json", **headers})

@@ -280,7 +280,7 @@ function ChecklistSection({ point, index, isLast, onResult, onError }) {
       console.log(`[CHECKPOINT ${index}] Sending POST request to Render...`);
 
       // 🚨 THE FIX: No 'headers' block used here at all! 
-      const response = await fetch('/api/audit-zone', { 
+      const response = await fetch('https://api-g4yu2qwvwa-uc.a.run.app/api/audit-zone', { 
           method: 'POST', 
           body: formData 
       });
