@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, Image, TouchableOpacity, ScrollView, ActivityIndicator, SafeAreaView, Platform, TextInput, Modal, KeyboardAvoidingView } from 'react-native';
+import { StyleSheet, Text, View, Image, TouchableOpacity, ScrollView, ActivityIndicator, SafeAreaView, Platform, TextInput, Modal, KeyboardAvoidingView, Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { Asset } from 'expo-asset';
@@ -236,12 +236,36 @@ function ChecklistSection({ point, index, isLast, onResult, onError }) {
   const [aiResult, setAiResult] = useState(null);
   const selectedEngine = 'openai'; 
 
-  const takePicture = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
-    if (!result.canceled) {
-      setActualImage(result.assets[0].uri);
-      setAiResult(null);
+  const takePicture = () => {
+    if (Platform.OS === 'web') {
+      const useCamera = window.confirm("Use Camera? \n(Click 'OK' for Camera, 'Cancel' for Gallery)");
+      if (useCamera) {
+        ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 }).then(result => {
+          if (!result.canceled) { setActualImage(result.assets[0].uri); setAiResult(null); }
+        });
+      } else {
+        ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 }).then(result => {
+          if (!result.canceled) { setActualImage(result.assets[0].uri); setAiResult(null); }
+        });
+      }
+      return;
     }
+    Alert.alert(
+      "Upload Image",
+      "Choose an option",
+      [
+        { text: "Camera", onPress: async () => {
+          await ImagePicker.requestCameraPermissionsAsync();
+          const result = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
+          if (!result.canceled) { setActualImage(result.assets[0].uri); setAiResult(null); }
+        }},
+        { text: "Gallery", onPress: async () => {
+          const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
+          if (!result.canceled) { setActualImage(result.assets[0].uri); setAiResult(null); }
+        }},
+        { text: "Cancel", style: "cancel" }
+      ]
+    );
   };
 
   const analyzeImages = async () => {
